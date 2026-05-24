@@ -7,6 +7,7 @@ const fileInput = ref(null)
 const forms = ref([])
 const currentView = ref('dashboard')
 const selectedFormId = ref(null)
+const selectedFieldId = ref(null)
 
 const selectedForm = computed(() => {
   return forms.value.find((form) => form.id === selectedFormId.value) ?? null
@@ -88,11 +89,13 @@ async function handleFileUpload(event) {
 function openBuilder(formId) {
   selectedFormId.value = formId
   currentView.value = 'builder'
+  selectedFieldId.value = null
 }
 
 function backToDashboard() {
   selectedFormId.value = null
   currentView.value = 'dashboard'
+  selectedFieldId.value = null
 }
 
 function removeField(fieldId) {
@@ -110,6 +113,96 @@ function removeField(fieldId) {
       fields: form.fields.filter((field) => field.id !== fieldId),
     }
   })
+}
+
+function addField() {
+  if (!selectedForm.value) {
+    return
+  }
+
+  const newField = {
+    id: `manual_${crypto.randomUUID()}`,
+    label: 'New field',
+    type: 'text',
+    page: 1,
+    rect: {
+      x: 0.1,
+      y: 0.1,
+      w: 0.3,
+      h: 0.03,
+    },
+    confidence: 1,
+    reason: 'manually added',
+  }
+
+  forms.value = forms.value.map((form) => {
+    if (form.id !== selectedForm.value.id) {
+      return form
+    }
+
+    return {
+      ...form,
+      fields: [...form.fields, newField],
+    }
+  })
+}
+
+function updateField(fieldId, updates) {
+  if (!selectedForm.value) {
+    return
+  }
+
+  forms.value = forms.value.map((form) => {
+    if (form.id !== selectedForm.value.id) {
+      return form
+    }
+
+    return {
+      ...form,
+      fields: form.fields.map((field) => {
+        if (field.id !== fieldId) {
+          return field
+        }
+
+        return {
+          ...field,
+          ...updates,
+        }
+      }),
+    }
+  })
+}
+
+function getPageImageUrl(form) {
+  return `${API_BASE_URL}/api/uploads/${form.id}/page/1.png`
+}
+
+function selectField(fieldId) {
+  selectedFieldId.value = fieldId
+}
+
+function getFieldDisplayName(field) {
+  return field.group ? `${field.group} - ${field.label}` : field.label
+}
+
+function getFieldBoxClass(field) {
+  return {
+    'field-box': true,
+    'field-box-text': ['text', 'date', 'number'].includes(field.type),
+    'field-box-checkbox': field.type === 'checkbox',
+    'field-box-multiline': field.type === 'multiline',
+    'field-box-manual': field.reason === 'manually added',
+    'field-box-selected': field.id === selectedFieldId.value,
+  }
+}
+
+function getFieldRowClass(field) {
+  return {
+    'list-group-item': true,
+    'px-3': true,
+    'py-2': true,
+    'field-row-selected': field.id === selectedFieldId.value,
+  }
 }
 </script>
 
@@ -232,20 +325,34 @@ function removeField(fieldId) {
               </div>
 
               <div class="card-body">
-                <div class="border rounded bg-light d-flex align-items-center justify-content-center p-5">
-                  <div class="text-center">
-                    <p class="fw-semibold mb-1">{{ selectedForm.name }}</p>
-                    <p class="text-secondary mb-0">
-                      Preview placeholder
-                    </p>
-                  </div>
+                <div class="pdf-preview border rounded bg-white">
+                  <img
+                    class="pdf-page-image"
+                    :src="getPageImageUrl(selectedForm)"
+                    :alt="`${selectedForm.name} page 1`"
+                  />
+
+                  <button
+                      v-for="field in selectedForm.fields"
+                      :key="field.id"
+                      type="button"
+                      :class="getFieldBoxClass(field)"
+                      :style="{
+                        left: `${field.rect.x * 100}%`,
+                        top: `${field.rect.y * 100}%`,
+                        width: `${field.rect.w * 100}%`,
+                        height: `${field.rect.h * 100}%`,
+                      }"
+                      :title="getFieldDisplayName(field)"
+                      @click="selectField(field.id)"
+                    ></button>
                 </div>
               </div>
             </div>
           </section>
 
           <aside class="col-lg-4">
-            <div class="card border-0 shadow-sm">
+            <div class="card border-0 shadow-sm sticky-fields-panel">
               <div class="card-header bg-white py-3">
                 <h2 class="h5 mb-1">Fields</h2>
                 <p class="text-secondary mb-0">
@@ -253,13 +360,13 @@ function removeField(fieldId) {
                 </p>
               </div>
 
-              <div class="card-body">
+              <div class="card-body fields-card-body">
                 <div class="d-flex justify-content-between align-items-center mb-3">
                   <span class="text-secondary small">
                     {{ selectedForm.fields.length }} suggested fields
                   </span>
 
-                  <button class="btn btn-success btn-sm" type="button">
+                  <button class="btn btn-success btn-sm" type="button" @click = "addField">
                     Add Field
                   </button>
                 </div>
@@ -268,20 +375,51 @@ function removeField(fieldId) {
                   No fields suggested yet.
                 </div>
 
-                <div v-else class="list-group">
+                <div v-else class="list-group field-list-scroll">
                   <div
                     v-for="field in selectedForm.fields"
                     :key="field.id"
-                    class="list-group-item px-3 py-2"
+                    :class="getFieldRowClass(field)"
+                    role="button"
+                    tabindex="0"
+                    @click="selectField(field.id)"
+                    @keydown.enter="selectField(field.id)"
                   >
-                    <div class="d-flex justify-content-between gap-2">
-                      <div>
-                        <p class="fw-semibold mb-1">
-                          <span v-if="field.group">{{ field.group }} - </span>{{ field.label }}
-                        </p>
+                    <div class="d-flex justify-content-between gap-3">
+                      <div class="flex-grow-1">
+                        <label class="form-label small text-secondary mb-1">
+                          Field label
+                        </label>
 
-                        <p class="text-secondary small mb-0">
-                          Page {{ field.page }} · {{ field.type }}
+                        <input
+                          class="form-control form-control-sm mb-2"
+                          type="text"
+                          :value="field.label"
+                          @input="updateField(field.id, { label: $event.target.value })"
+                        />
+
+                        <div v-if="field.group" class="text-secondary small mb-2">
+                          Group: {{ field.group }}
+                        </div>
+
+                        <label class="form-label small text-secondary mb-1">
+                          Field type
+                        </label>
+
+                        <select
+                          class="form-select form-select-sm"
+                          :value="field.type"
+                          @change="updateField(field.id, { type: $event.target.value })"
+                        >
+                          <option value="text">Text</option>
+                          <option value="date">Date</option>
+                          <option value="number">Number</option>
+                          <option value="checkbox">Checkbox</option>
+                          <option value="multiline">Multiline</option>
+                        </select>
+
+                        <p class="text-secondary small mt-2 mb-0">
+                          Page {{ field.page }} · {{ field.reason }}
                         </p>
                       </div>
 
@@ -309,3 +447,99 @@ function removeField(fieldId) {
     </div>
   </main>
 </template>
+
+<style scoped>
+.pdf-preview {
+  position: relative;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.pdf-page-image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.field-box {
+  position: absolute;
+  padding: 0;
+  border: 2px solid;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0.9;
+}
+
+.field-box-text {
+  border-color: #198754;
+  background: rgba(25, 135, 84, 0.14);
+}
+
+.field-box-checkbox {
+  border-color: #0d6efd;
+  background: rgba(13, 110, 253, 0.16);
+}
+
+.field-box-multiline {
+  border-color: #6f42c1;
+  background: rgba(111, 66, 193, 0.14);
+}
+
+.field-box-manual {
+  border-style: dashed;
+}
+
+.field-box-selected {
+  border-color: #fd7e14;
+  background: rgba(253, 126, 20, 0.2);
+  box-shadow: 0 0 0 3px rgba(253, 126, 20, 0.25);
+  z-index: 2;
+}
+
+.field-row-selected {
+  background: #fff3e8;
+  border-left: 4px solid #fd7e14;
+}
+
+.field-box:hover {
+  opacity: 1;
+}
+
+.sticky-fields-panel {
+  position: sticky;
+  top: 24px;
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+.fields-card-body {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.field-list-scroll {
+  min-height: 0;
+  max-height: 58vh;
+  overflow-y: auto;
+}
+
+.field-list-scroll {
+  max-height: 62vh;
+  overflow-y: auto;
+}
+.field-list-scroll .list-group-item {
+  border-left: 0;
+  border-right: 0;
+}
+
+.field-list-scroll .list-group-item:first-child {
+  border-top: 0;
+}
+
+.field-list-scroll .list-group-item:last-child {
+  border-bottom: 0;
+}
+
+</style>

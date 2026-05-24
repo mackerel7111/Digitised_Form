@@ -134,3 +134,21 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Backend storage / generated files
+backend/storage/
+storage/
+*.sqlite3
+*.db
+
+# Environment variables
+.env
+.env.*
+!.env.example

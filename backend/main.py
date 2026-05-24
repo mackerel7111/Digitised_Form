@@ -1,8 +1,10 @@
 from pathlib import Path
 from uuid import uuid4
 
+import fitz
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
 from extract_fields import extract_fields
 
@@ -60,3 +62,29 @@ async def extract_fields_from_upload(file: UploadFile = File(...)):
         "filename": file.filename,
         "fields": result["fields"],
     }
+    
+@app.get("/api/uploads/{upload_id}/page/{page_number}.png")
+def render_uploaded_pdf_page(upload_id: str, page_number: int):
+    pdf_path = UPLOADS_DIR / f"{upload_id}.pdf"
+
+    if not pdf_path.exists():
+        raise HTTPException(status_code=404, detail="Uploaded PDF not found")
+
+    if page_number < 1:
+        raise HTTPException(status_code=400, detail="Page number must be 1 or greater")
+
+    try:
+        with fitz.open(pdf_path) as document:
+            if page_number > document.page_count:
+                raise HTTPException(status_code=404, detail="Page not found")
+
+            page = document[page_number - 1]
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            png_bytes = pixmap.tobytes("png")
+
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Could not render PDF page: {error}") from error
+
+    return Response(content=png_bytes, media_type="image/png")
