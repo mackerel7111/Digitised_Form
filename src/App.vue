@@ -1,21 +1,87 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+
+import DashboardView from './components/DashboardView.vue'
+import EntriesView from './components/EntriesView.vue'
+import FillFormView from './components/FillFormView.vue'
+import TemplateBuilderView from './components/TemplateBuilderView.vue'
 
 const API_BASE_URL = 'http://127.0.0.1:8000'
 
-const fileInput = ref(null)
 const forms = ref([])
 const currentView = ref('dashboard')
 const selectedFormId = ref(null)
 const selectedFieldId = ref(null)
+const dragState = ref(null)
+const submissionValues = ref({})
+const selectedSubmissions = ref([])
 
 const selectedForm = computed(() => {
   return forms.value.find((form) => form.id === selectedFormId.value) ?? null
 })
 
-function openFilePicker() {
-  fileInput.value?.click()
+async function loadForms() {
+  const response = await fetch(`${API_BASE_URL}/api/forms`)
+
+  if (!response.ok) {
+    console.error('Could not load saved forms')
+    return
+  }
+
+  forms.value = await response.json()
 }
+
+async function saveTemplate(form) {
+  const response = await fetch(`${API_BASE_URL}/api/forms/${form.id}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      fields: form.fields,
+      status: form.status,
+    }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null)
+    throw new Error(error?.detail ?? 'Could not save template')
+  }
+
+  return response.json()
+}
+
+async function saveSubmission() {
+  if (!selectedForm.value) {
+    return
+  }
+
+  try {
+    const savedSubmission = await saveSubmissionToBackend(
+      selectedForm.value.id,
+      submissionValues.value,
+    )
+
+    forms.value = forms.value.map((form) => {
+      if (form.id !== selectedForm.value.id) {
+        return form
+      }
+
+      return {
+        ...form,
+        submissions: [...(form.submissions ?? []), savedSubmission],
+      }
+    })
+
+    backToDashboard()
+  } catch (error) {
+    alert(error.message)
+  }
+}
+
+onMounted(() => {
+  loadForms()
+})
 
 async function extractFields(file) {
   const formData = new FormData()
@@ -96,6 +162,104 @@ function backToDashboard() {
   selectedFormId.value = null
   currentView.value = 'dashboard'
   selectedFieldId.value = null
+  selectedSubmissions.value = []
+}
+
+async function publishTemplate() {
+  if (!selectedForm.value) {
+    return
+  }
+
+  const formToPublish = {
+    ...selectedForm.value,
+    status: 'Published',
+  }
+
+  try {
+    const savedForm = await saveTemplate(formToPublish)
+
+    forms.value = forms.value.map((form) => {
+      if (form.id !== savedForm.id) {
+        return form
+      }
+
+      return savedForm
+    })
+
+    backToDashboard()
+  } catch (error) {
+    alert(error.message)
+  }
+}
+
+async function saveDraftTemplate() {
+  if (!selectedForm.value) {
+    return
+  }
+
+  try {
+    const savedForm = await saveTemplate(selectedForm.value)
+
+    forms.value = forms.value.map((form) => {
+      if (form.id !== savedForm.id) {
+        return form
+      }
+
+      return savedForm
+    })
+
+    alert('Draft saved')
+  } catch (error) {
+    alert(error.message)
+  }
+}
+
+async function saveSubmissionToBackend(formId, values) {
+  const response = await fetch(`${API_BASE_URL}/api/forms/${formId}/submissions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ values }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null)
+    throw new Error(error?.detail ?? 'Could not save submission')
+  }
+
+  return response.json()
+}
+
+function getFillFormItems(fields) {
+  const items = []
+  const checkboxGroups = new Map()
+
+  for (const field of fields) {
+    if (field.type === 'checkbox' && field.group) {
+      if (!checkboxGroups.has(field.group)) {
+        const groupItem = {
+          id: `group_${field.group}`,
+          type: 'checkbox_group',
+          label: field.group,
+          fields: [],
+        }
+
+        checkboxGroups.set(field.group, groupItem)
+        items.push(groupItem)
+      }
+
+      checkboxGroups.get(field.group).fields.push(field)
+    } else {
+      items.push({
+        id: field.id,
+        type: 'field',
+        field,
+      })
+    }
+  }
+
+  return items
 }
 
 function removeField(fieldId) {
@@ -113,6 +277,69 @@ function removeField(fieldId) {
       fields: form.fields.filter((field) => field.id !== fieldId),
     }
   })
+}
+
+async function loadSubmissions(formId) {
+  const response = await fetch(`${API_BASE_URL}/api/forms/${formId}/submissions`)
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null)
+    throw new Error(error?.detail ?? 'Could not load submissions')
+  }
+
+  return response.json()
+}
+
+async function openEntries(formId) {
+  const form = forms.value.find((item) => item.id === formId)
+
+  if (!form) {
+    return
+  }
+
+  try {
+    selectedFormId.value = formId
+    selectedFieldId.value = null
+    selectedSubmissions.value = await loadSubmissions(formId)
+    currentView.value = 'entries'
+  } catch (error) {
+    alert(error.message)
+  }
+}
+
+async function downloadSubmissionPdf(submission) {
+  if (!selectedForm.value) {
+    return
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/uploads/${selectedForm.value.id}/export`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      fields: selectedForm.value.fields,
+      values: submission.values,
+    }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null)
+    alert(error?.detail ?? 'Could not export filled PDF')
+    return
+  }
+
+  const blob = await response.blob()
+  const downloadUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+
+  link.href = downloadUrl
+  link.download = `${selectedForm.value.name.replace(/\.pdf$/i, '')}-${submission.id}.pdf`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+
+  URL.revokeObjectURL(downloadUrl)
 }
 
 function addField() {
@@ -173,6 +400,33 @@ function updateField(fieldId, updates) {
   })
 }
 
+function updateFieldType(fieldId, type) {
+  const updates = { type }
+
+  if (type === 'date') {
+    updates.renderMode = 'single'
+    updates.dateFormat = 'DDMMYYYY'
+    updates.boxCount = 8
+    updates.boxGap = 0.4
+  }
+
+  updateField(fieldId, updates)
+}
+
+function updateFieldRectValue(fieldId, key, value) {
+  const numericValue = Number(value)
+
+  if (!Number.isFinite(numericValue)) {
+    return
+  }
+
+  const normalizedValue = numericValue / 100
+
+  updateFieldRect(fieldId, {
+    [key]: Number(normalizedValue.toFixed(4)),
+  })
+}
+
 function getPageImageUrl(form) {
   return `${API_BASE_URL}/api/uploads/${form.id}/page/1.png`
 }
@@ -204,342 +458,205 @@ function getFieldRowClass(field) {
     'field-row-selected': field.id === selectedFieldId.value,
   }
 }
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max)
+}
+
+function updateFieldRect(fieldId, rectUpdates) {
+  if (!selectedForm.value) {
+    return
+  }
+
+  forms.value = forms.value.map((form) => {
+    if (form.id !== selectedForm.value.id) {
+      return form
+    }
+
+    return {
+      ...form,
+      fields: form.fields.map((field) => {
+        if (field.id !== fieldId) {
+          return field
+        }
+
+        return {
+          ...field,
+          rect: {
+            ...field.rect,
+            ...rectUpdates,
+          },
+        }
+      }),
+    }
+  })
+}
+
+function startFieldDrag(event, field, previewElement) {
+  const targetPreviewElement = previewElement?.value ?? previewElement
+
+  if (!targetPreviewElement) {
+    return
+  }
+
+  event.preventDefault()
+  event.stopPropagation()
+
+  selectField(field.id)
+
+  const previewRect = targetPreviewElement.getBoundingClientRect()
+
+  dragState.value = {
+    fieldId: field.id,
+    startClientX: event.clientX,
+    startClientY: event.clientY,
+    startX: field.rect.x,
+    startY: field.rect.y,
+    width: field.rect.w,
+    height: field.rect.h,
+    previewWidth: previewRect.width,
+    previewHeight: previewRect.height,
+  }
+
+  window.addEventListener('pointermove', handleFieldDrag)
+  window.addEventListener('pointerup', stopFieldDrag)
+}
+
+function handleFieldDrag(event) {
+  if (!dragState.value) {
+    return
+  }
+
+  const deltaX = (event.clientX - dragState.value.startClientX) / dragState.value.previewWidth
+  const deltaY = (event.clientY - dragState.value.startClientY) / dragState.value.previewHeight
+
+  const nextX = clamp(dragState.value.startX + deltaX, 0, 1 - dragState.value.width)
+  const nextY = clamp(dragState.value.startY + deltaY, 0, 1 - dragState.value.height)
+
+  updateFieldRect(dragState.value.fieldId, {
+    x: Number(nextX.toFixed(4)),
+    y: Number(nextY.toFixed(4)),
+  })
+}
+
+function stopFieldDrag() {
+  dragState.value = null
+  window.removeEventListener('pointermove', handleFieldDrag)
+  window.removeEventListener('pointerup', stopFieldDrag)
+}
+
+function openFiller(formId) {
+  const form = forms.value.find((item) => item.id === formId)
+
+  if (!form || form.status !== 'Published') {
+    return
+  }
+
+  selectedFormId.value = formId
+  selectedFieldId.value = null
+
+  const initialValues = {}
+
+  for (const field of form.fields) {
+    initialValues[field.id] = field.type === 'checkbox' ? false : ''
+  }
+
+  submissionValues.value = initialValues
+  currentView.value = 'filler'
+}
+
+function updateSubmissionValue(fieldId, value) {
+  submissionValues.value = {
+    ...submissionValues.value,
+    [fieldId]: value,
+  }
+}
+
+async function downloadFilledPdf() {
+  if (!selectedForm.value) {
+    return
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/uploads/${selectedForm.value.id}/export`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      fields: selectedForm.value.fields,
+      values: submissionValues.value,
+    }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null)
+    alert(error?.detail ?? 'Could not export filled PDF')
+    return
+  }
+
+  const blob = await response.blob()
+  const downloadUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+
+  link.href = downloadUrl
+  link.download = `${selectedForm.value.name.replace(/\.pdf$/i, '')}-filled.pdf`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+
+  URL.revokeObjectURL(downloadUrl)
+}
 </script>
 
 <template>
   <main class="bg-light min-vh-100">
     <div class="container py-5">
-      <template v-if="currentView === 'dashboard'">
-        <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 mb-4">
-          <div>
-            <p class="text-uppercase fw-bold text-secondary small mb-2">
-              Form Digitisation Pipeline
-            </p>
-            <h1 class="display-5 fw-bold mb-3">Digitised Forms</h1>
-            <p class="text-secondary lead mb-0">
-              Upload PDF forms, create reusable digital templates, fill entries, and export
-              completed PDFs with values overlaid onto the original document.
-            </p>
-          </div>
+      <DashboardView
+        v-if="currentView === 'dashboard'"
+        :forms="forms"
+        @upload="handleFileUpload"
+        @open-builder="openBuilder"
+        @open-filler="openFiller"
+        @open-entries="openEntries"
+      />
 
-          <div class="d-flex align-items-start">
-            <input
-              ref="fileInput"
-              class="d-none"
-              type="file"
-              accept="application/pdf"
-              multiple
-              @change="handleFileUpload"
-            />
+      <TemplateBuilderView
+        v-else-if="currentView === 'builder' && selectedForm"
+        :selected-form="selectedForm"
+        :back-to-dashboard="backToDashboard"
+        :save-draft-template="saveDraftTemplate"
+        :publish-template="publishTemplate"
+        :add-field="addField"
+        :remove-field="removeField"
+        :update-field="updateField"
+        :update-field-type="updateFieldType"
+        :update-field-rect-value="updateFieldRectValue"
+        :get-page-image-url="getPageImageUrl"
+        :select-field="selectField"
+        :get-field-display-name="getFieldDisplayName"
+        :get-field-box-class="getFieldBoxClass"
+        :get-field-row-class="getFieldRowClass"
+        :start-field-drag="startFieldDrag"
+      />
 
-            <button class="btn btn-success fw-semibold" type="button" @click="openFilePicker">
-              Upload PDF
-            </button>
-          </div>
-        </div>
+      <FillFormView
+        v-else-if="currentView === 'filler' && selectedForm"
+        :selected-form="selectedForm"
+        :submission-values="submissionValues"
+        :back-to-dashboard="backToDashboard"
+        :get-fill-form-items="getFillFormItems"
+        :update-submission-value="updateSubmissionValue"
+        :download-filled-pdf="downloadFilledPdf"
+        :save-submission="saveSubmission"
+      />
 
-        <section class="card border-0 shadow-sm">
-          <div class="card-header bg-white py-3">
-            <h2 class="h5 mb-1">Forms</h2>
-            <p class="text-secondary mb-0">
-              Published and draft form templates will appear here.
-            </p>
-          </div>
-
-          <div v-if="forms.length === 0" class="card-body text-center py-5">
-            <h3 class="h6 mb-2">No forms yet</h3>
-            <p class="text-secondary mb-0">
-              Upload a PDF form to start creating your first digital template.
-            </p>
-          </div>
-
-          <div v-else class="list-group list-group-flush">
-            <div
-              v-for="form in forms"
-              :key="form.id"
-              class="list-group-item d-flex flex-column flex-md-row justify-content-between gap-3 py-3"
-            >
-              <div>
-                <div class="d-flex align-items-center gap-2 mb-1">
-                  <h3 class="h6 mb-0">{{ form.name }}</h3>
-                  <span class="badge text-bg-warning">{{ form.status }}</span>
-                </div>
-                  <p class="text-secondary small mb-0">
-                    <span v-if="form.extractionStatus === 'extracting'">
-                      Extracting suggested fields...
-                    </span>
-                    <span v-else-if="form.extractionStatus === 'complete'">
-                      {{ form.fields.length }} suggested fields found.
-                    </span>
-                    <span v-else-if="form.extractionStatus === 'failed'" class="text-danger">
-                      {{ form.error }}
-                    </span>
-                  </p>
-              </div>
-
-              <div class="d-flex align-items-center gap-2">
-                <button
-                  class="btn btn-outline-secondary btn-sm"
-                  type="button"
-                  :disabled="form.extractionStatus === 'extracting'"
-                  @click="openBuilder(form.id)"
-                >
-                  Build Template
-                </button>
-                <button class="btn btn-outline-secondary btn-sm" type="button" disabled>
-                  Fill
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
-      </template>
-
-      <template v-else-if="currentView === 'builder' && selectedForm">
-        <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 mb-4">
-          <div>
-            <p class="text-uppercase fw-bold text-secondary small mb-2">
-              Template Builder
-            </p>
-            <h1 class="h2 fw-bold mb-2">{{ selectedForm.name }}</h1>
-            <p class="text-secondary mb-0">
-              Mark the fillable fields on the PDF before publishing this form.
-            </p>
-          </div>
-
-          <div class="d-flex align-items-start">
-            <button class="btn btn-outline-secondary" type="button" @click="backToDashboard">
-              Back to Forms
-            </button>
-          </div>
-        </div>
-
-        <div class="row g-4">
-          <section class="col-lg-8">
-            <div class="card border-0 shadow-sm">
-              <div class="card-header bg-white py-3">
-                <h2 class="h5 mb-1">PDF Preview</h2>
-                <p class="text-secondary mb-0">
-                  PDF rendering will go here next.
-                </p>
-              </div>
-
-              <div class="card-body">
-                <div class="pdf-preview border rounded bg-white">
-                  <img
-                    class="pdf-page-image"
-                    :src="getPageImageUrl(selectedForm)"
-                    :alt="`${selectedForm.name} page 1`"
-                  />
-
-                  <button
-                      v-for="field in selectedForm.fields"
-                      :key="field.id"
-                      type="button"
-                      :class="getFieldBoxClass(field)"
-                      :style="{
-                        left: `${field.rect.x * 100}%`,
-                        top: `${field.rect.y * 100}%`,
-                        width: `${field.rect.w * 100}%`,
-                        height: `${field.rect.h * 100}%`,
-                      }"
-                      :title="getFieldDisplayName(field)"
-                      @click="selectField(field.id)"
-                    ></button>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <aside class="col-lg-4">
-            <div class="card border-0 shadow-sm sticky-fields-panel">
-              <div class="card-header bg-white py-3">
-                <h2 class="h5 mb-1">Fields</h2>
-                <p class="text-secondary mb-0">
-                  Fields added to this template will appear here.
-                </p>
-              </div>
-
-              <div class="card-body fields-card-body">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                  <span class="text-secondary small">
-                    {{ selectedForm.fields.length }} suggested fields
-                  </span>
-
-                  <button class="btn btn-success btn-sm" type="button" @click = "addField">
-                    Add Field
-                  </button>
-                </div>
-
-                <div v-if="selectedForm.fields.length === 0" class="text-center text-secondary py-4">
-                  No fields suggested yet.
-                </div>
-
-                <div v-else class="list-group field-list-scroll">
-                  <div
-                    v-for="field in selectedForm.fields"
-                    :key="field.id"
-                    :class="getFieldRowClass(field)"
-                    role="button"
-                    tabindex="0"
-                    @click="selectField(field.id)"
-                    @keydown.enter="selectField(field.id)"
-                  >
-                    <div class="d-flex justify-content-between gap-3">
-                      <div class="flex-grow-1">
-                        <label class="form-label small text-secondary mb-1">
-                          Field label
-                        </label>
-
-                        <input
-                          class="form-control form-control-sm mb-2"
-                          type="text"
-                          :value="field.label"
-                          @input="updateField(field.id, { label: $event.target.value })"
-                        />
-
-                        <div v-if="field.group" class="text-secondary small mb-2">
-                          Group: {{ field.group }}
-                        </div>
-
-                        <label class="form-label small text-secondary mb-1">
-                          Field type
-                        </label>
-
-                        <select
-                          class="form-select form-select-sm"
-                          :value="field.type"
-                          @change="updateField(field.id, { type: $event.target.value })"
-                        >
-                          <option value="text">Text</option>
-                          <option value="date">Date</option>
-                          <option value="number">Number</option>
-                          <option value="checkbox">Checkbox</option>
-                          <option value="multiline">Multiline</option>
-                        </select>
-
-                        <p class="text-secondary small mt-2 mb-0">
-                          Page {{ field.page }} · {{ field.reason }}
-                        </p>
-                      </div>
-
-                      <div class="d-flex flex-column align-items-end gap-2">
-                        <span class="badge text-bg-light border">
-                          {{ Math.round(field.confidence * 100) }}%
-                        </span>
-
-                        <button
-                          class="btn btn-outline-danger btn-sm"
-                          type="button"
-                          @click="removeField(field.id)"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </aside>
-        </div>
-      </template>
+      <EntriesView
+        v-else-if="currentView === 'entries' && selectedForm"
+        :selected-form="selectedForm"
+        :selected-submissions="selectedSubmissions"
+        :back-to-dashboard="backToDashboard"
+        :download-submission-pdf="downloadSubmissionPdf"
+      />
     </div>
   </main>
 </template>
-
-<style scoped>
-.pdf-preview {
-  position: relative;
-  max-width: 100%;
-  overflow: hidden;
-}
-
-.pdf-page-image {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-
-.field-box {
-  position: absolute;
-  padding: 0;
-  border: 2px solid;
-  border-radius: 3px;
-  cursor: pointer;
-  opacity: 0.9;
-}
-
-.field-box-text {
-  border-color: #198754;
-  background: rgba(25, 135, 84, 0.14);
-}
-
-.field-box-checkbox {
-  border-color: #0d6efd;
-  background: rgba(13, 110, 253, 0.16);
-}
-
-.field-box-multiline {
-  border-color: #6f42c1;
-  background: rgba(111, 66, 193, 0.14);
-}
-
-.field-box-manual {
-  border-style: dashed;
-}
-
-.field-box-selected {
-  border-color: #fd7e14;
-  background: rgba(253, 126, 20, 0.2);
-  box-shadow: 0 0 0 3px rgba(253, 126, 20, 0.25);
-  z-index: 2;
-}
-
-.field-row-selected {
-  background: #fff3e8;
-  border-left: 4px solid #fd7e14;
-}
-
-.field-box:hover {
-  opacity: 1;
-}
-
-.sticky-fields-panel {
-  position: sticky;
-  top: 24px;
-  max-height: calc(100vh - 48px);
-  display: flex;
-  flex-direction: column;
-}
-
-.fields-card-body {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.field-list-scroll {
-  min-height: 0;
-  max-height: 58vh;
-  overflow-y: auto;
-}
-
-.field-list-scroll {
-  max-height: 62vh;
-  overflow-y: auto;
-}
-.field-list-scroll .list-group-item {
-  border-left: 0;
-  border-right: 0;
-}
-
-.field-list-scroll .list-group-item:first-child {
-  border-top: 0;
-}
-
-.field-list-scroll .list-group-item:last-child {
-  border-bottom: 0;
-}
-
-</style>
