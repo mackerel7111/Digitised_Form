@@ -1,7 +1,7 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
-defineProps({
+const props = defineProps({
   selectedForm: {
     type: Object,
     required: true,
@@ -35,6 +35,14 @@ defineProps({
     required: true,
   },
   updateField: {
+    type: Function,
+    required: true,
+  },
+  updateTableColumnLabel: {
+    type: Function,
+    required: true,
+  },
+  updateTableName: {
     type: Function,
     required: true,
   },
@@ -73,6 +81,114 @@ defineProps({
 })
 
 const pdfPreviewRef = ref(null)
+const expandedTableIds = ref(new Set())
+
+function toggleTable(tableId) {
+  const nextExpandedTableIds = new Set(expandedTableIds.value)
+
+  if (nextExpandedTableIds.has(tableId)) {
+    nextExpandedTableIds.delete(tableId)
+  } else {
+    nextExpandedTableIds.add(tableId)
+  }
+
+  expandedTableIds.value = nextExpandedTableIds
+}
+
+function isTableExpanded(tableId) {
+  return expandedTableIds.value.has(tableId)
+}
+
+const expandedColumnHeaderIds = ref(new Set())
+
+function toggleColumnHeaders(tableId) {
+  const next = new Set(expandedColumnHeaderIds.value)
+  if (next.has(tableId)) {
+    next.delete(tableId)
+  } else {
+    next.add(tableId)
+  }
+  expandedColumnHeaderIds.value = next
+}
+
+function isColumnHeadersExpanded(tableId) {
+  return expandedColumnHeaderIds.value.has(tableId)
+}
+
+const fieldEditorItems = computed(() => {
+  const items = []
+  const tableGroups = new Map()
+
+  for (const field of props.selectedForm.fields) {
+    if (field.tableId) {
+      if (!tableGroups.has(field.tableId)) {
+        const tableGroup = {
+          id: field.tableId,
+          type: 'table_group',
+          tableId: field.tableId,
+          tableName: field.tableName ?? 'Table',
+          page: field.page,
+          fields: [],
+          tableRows: field.tableRows ?? field.tableRow ?? 1,
+          tableColumns: field.tableColumns ?? field.tableColumn ?? 1,
+          confidence: field.confidence ?? 0,
+        }
+
+        tableGroups.set(field.tableId, tableGroup)
+        items.push(tableGroup)
+      }
+
+      const group = tableGroups.get(field.tableId)
+
+      group.fields.push(field)
+      group.tableRows = Math.max(group.tableRows, field.tableRows ?? field.tableRow ?? 1)
+      group.tableColumns = Math.max(group.tableColumns, field.tableColumns ?? field.tableColumn ?? 1)
+      group.confidence = Math.max(group.confidence, field.confidence ?? 0)
+
+      continue
+    }
+
+    items.push({
+      id: field.id,
+      type: 'field',
+      field,
+    })
+  }
+
+  for (const item of items) {
+    if (item.type === 'table_group') {
+      item.fields.sort((a, b) => {
+        const rowDiff = (a.tableRow ?? 0) - (b.tableRow ?? 0)
+
+        if (rowDiff !== 0) {
+          return rowDiff
+        }
+
+        return (a.tableColumn ?? 0) - (b.tableColumn ?? 0)
+      })
+    }
+  }
+
+  return items
+})
+
+function getTableColumnIndexes(tableItem) {
+  const columns = new Set()
+
+  for (const field of tableItem.fields) {
+    if (field.tableColumn) {
+      columns.add(field.tableColumn)
+    }
+  }
+
+  return Array.from(columns).sort((a, b) => a - b)
+}
+
+function getTableColumnLabel(tableItem, columnIndex) {
+  const field = tableItem.fields.find((item) => item.tableColumn === columnIndex)
+
+  return field?.tableColumnLabel ?? `Column ${columnIndex}`
+}
 </script>
 
 <template>
@@ -118,6 +234,7 @@ const pdfPreviewRef = ref(null)
               :src="getPageImageUrl(selectedForm)"
               :alt="`${selectedForm.name} page 1`"
             />
+
             <button
               v-for="field in selectedForm.fields"
               :key="field.id"
@@ -159,7 +276,7 @@ const pdfPreviewRef = ref(null)
         <div class="card-body fields-card-body">
           <div class="d-flex justify-content-between align-items-center mb-3">
             <span class="text-secondary small">
-              {{ selectedForm.fields.length }} suggested fields
+              {{ fieldEditorItems.length }} editor items · {{ selectedForm.fields.length }} fillable fields
             </span>
 
             <button class="btn btn-success btn-sm" type="button" @click="addField">
@@ -172,155 +289,362 @@ const pdfPreviewRef = ref(null)
           </div>
 
           <div v-else class="list-group field-list-scroll">
-            <div
-              v-for="(field, index) in selectedForm.fields"
-              :key="field.id"
-              :class="getFieldRowClass(field)"
-              role="button"
-              tabindex="0"
-              @click="selectField(field.id)"
-              @keydown.enter="selectField(field.id)"
-            >
-              <div class="d-flex justify-content-between gap-3">
-                <div class="flex-grow-1">
-                  <label class="form-label small text-secondary mb-1">Field label</label>
+            <template v-for="(item, index) in fieldEditorItems">
+              <!-- Normal field item -->
+              <div
+                v-if="item.type === 'field'"
+                :key="item.id"
+                :class="getFieldRowClass(item.field)"
+                role="button"
+                tabindex="0"
+                @click="selectField(item.field.id)"
+                @keydown.enter="selectField(item.field.id)"
+              >
+                <div class="d-flex justify-content-between gap-3">
+                  <div class="flex-grow-1">
+                    <label class="form-label small text-secondary mb-1">Field label</label>
 
-                  <input
-                    class="form-control form-control-sm mb-2"
-                    type="text"
-                    :value="field.label"
-                    @input="updateField(field.id, { label: $event.target.value })"
-                  />
+                    <input
+                      class="form-control form-control-sm mb-2"
+                      type="text"
+                      :value="item.field.label"
+                      @input="updateField(item.field.id, { label: $event.target.value })"
+                    />
 
-                  <div v-if="field.group" class="text-secondary small mb-2">
-                    Group: {{ field.group }}
-                  </div>
+                    <div v-if="item.field.group" class="text-secondary small mb-2">
+                      Group: {{ item.field.group }}
+                    </div>
 
-                  <label class="form-label small text-secondary mb-1">Field type</label>
-
-                  <select
-                    class="form-select form-select-sm mb-2"
-                    :value="field.type"
-                    @change="updateFieldType(field.id, $event.target.value)"
-                  >
-                    <option value="text">Text</option>
-                    <option value="date">Date</option>
-                    <option value="number">Number</option>
-                    <option value="checkbox">Checkbox</option>
-                    <option value="multiline">Multiline</option>
-                  </select>
-
-                  <div v-if="field.type === 'date'" class="border rounded p-2 mb-2 bg-light">
-                    <label class="form-label small text-secondary mb-1">Date render mode</label>
+                    <label class="form-label small text-secondary mb-1">Field type</label>
 
                     <select
                       class="form-select form-select-sm mb-2"
-                      :value="field.renderMode ?? 'single'"
-                      @change="updateField(field.id, { renderMode: $event.target.value })"
+                      :value="item.field.type"
+                      @change="updateFieldType(item.field.id, $event.target.value)"
                     >
-                      <option value="single">Single text</option>
-                      <option value="date_boxes">Date boxes</option>
+                      <option value="text">Text</option>
+                      <option value="date">Date</option>
+                      <option value="number">Number</option>
+                      <option value="checkbox">Checkbox</option>
+                      <option value="multiline">Multiline</option>
+                      <option value="table">Table</option>
                     </select>
 
-                    <div v-if="field.renderMode === 'date_boxes'" class="row g-2">
+                    <div v-if="item.field.type === 'date'" class="border rounded p-2 mb-2 bg-light">
+                      <label class="form-label small text-secondary mb-1">Date render mode</label>
+
+                      <select
+                        class="form-select form-select-sm mb-2"
+                        :value="item.field.renderMode ?? 'single'"
+                        @change="updateField(item.field.id, { renderMode: $event.target.value })"
+                      >
+                        <option value="single">Single text</option>
+                        <option value="date_boxes">Date boxes</option>
+                      </select>
+
+                      <div v-if="item.field.renderMode === 'date_boxes'" class="row g-2">
+                        <div class="col-6">
+                          <label class="form-label small text-secondary mb-1">Boxes</label>
+                          <input
+                            class="form-control form-control-sm"
+                            type="number"
+                            min="1"
+                            max="12"
+                            step="1"
+                            :value="item.field.boxCount ?? 8"
+                            @input="updateField(item.field.id, { boxCount: Number($event.target.value) })"
+                          />
+                        </div>
+
+                        <div class="col-6">
+                          <label class="form-label small text-secondary mb-1">Gap %</label>
+                          <input
+                            class="form-control form-control-sm"
+                            type="number"
+                            min="0"
+                            max="5"
+                            step="0.1"
+                            :value="item.field.boxGap ?? 0.4"
+                            @input="updateField(item.field.id, { boxGap: Number($event.target.value) })"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div v-if="item.field.type === 'table'" class="border rounded p-2 mb-2 bg-light">
+                      <label class="form-label small text-secondary mb-1">Table layout</label>
+
+                      <div class="row g-2">
+                        <div class="col-6">
+                          <label class="form-label small text-secondary mb-1">Cells across</label>
+                          <input
+                            class="form-control form-control-sm"
+                            type="number"
+                            min="1"
+                            max="20"
+                            step="1"
+                            :value="item.field.tableColumns ?? 3"
+                            @input="updateField(item.field.id, { tableColumns: Number($event.target.value) })"
+                          />
+                        </div>
+
+                        <div class="col-6">
+                          <label class="form-label small text-secondary mb-1">Height rows</label>
+                          <input
+                            class="form-control form-control-sm"
+                            type="number"
+                            min="1"
+                            max="50"
+                            step="1"
+                            :value="item.field.tableRows ?? 3"
+                            @input="updateField(item.field.id, { tableRows: Number($event.target.value) })"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="row g-2">
                       <div class="col-6">
-                        <label class="form-label small text-secondary mb-1">Boxes</label>
+                        <label class="form-label small text-secondary mb-1">Width %</label>
                         <input
                           class="form-control form-control-sm"
                           type="number"
                           min="1"
-                          max="12"
-                          step="1"
-                          :value="field.boxCount ?? 8"
-                          @input="updateField(field.id, { boxCount: Number($event.target.value) })"
+                          max="100"
+                          step="0.1"
+                          :value="Number((item.field.rect.w * 100).toFixed(1))"
+                          @input="updateFieldRectValue(item.field.id, 'w', $event.target.value)"
                         />
                       </div>
 
                       <div class="col-6">
-                        <label class="form-label small text-secondary mb-1">Gap %</label>
+                        <label class="form-label small text-secondary mb-1">Height %</label>
                         <input
                           class="form-control form-control-sm"
                           type="number"
-                          min="0"
-                          max="5"
+                          min="0.5"
+                          max="100"
                           step="0.1"
-                          :value="field.boxGap ?? 0.4"
-                          @input="updateField(field.id, { boxGap: Number($event.target.value) })"
+                          :value="Number((item.field.rect.h * 100).toFixed(1))"
+                          @input="updateFieldRectValue(item.field.id, 'h', $event.target.value)"
                         />
+                      </div>
+                    </div>
+
+                    <p class="text-secondary small mt-2 mb-0">
+                      Page {{ item.field.page }} · {{ item.field.reason }}
+                    </p>
+                  </div>
+
+                  <div class="d-flex flex-column align-items-end gap-2">
+                    <span class="badge text-bg-light border">
+                      {{ Math.round(item.field.confidence * 100) }}%
+                    </span>
+
+                    <button
+                      class="btn btn-outline-secondary btn-sm"
+                      type="button"
+                      :disabled="index === 0"
+                      @click.stop="moveField(item.field.id, 'up')"
+                      aria-label="Move up"
+                      title="Move up"
+                    >
+                      &uarr;
+                    </button>
+
+                    <button
+                      class="btn btn-outline-secondary btn-sm"
+                      type="button"
+                      :disabled="index === fieldEditorItems.length - 1"
+                      @click.stop="moveField(item.field.id, 'down')"
+                      aria-label="Move down"
+                      title="Move down"
+                    >
+                      &darr;
+                    </button>
+
+                    <button
+                      class="btn btn-outline-danger btn-sm"
+                      type="button"
+                      @click.stop="removeField(item.field.id)"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Table group item -->
+              <div
+                v-else-if="item.type === 'table_group'"
+                :key="`field-${item.id}`"
+                class="list-group-item px-3 py-3"
+              >
+                <div class="d-flex justify-content-between gap-3">
+                  <div class="flex-grow-1">
+                    <!-- Table summary -->
+                    <label class="form-label small text-secondary mb-1">Table name</label>
+                    <input
+                      class="form-control form-control-sm mb-2"
+                      type="text"
+                      :value="item.tableName"
+                      @input="updateTableName(item.tableId, $event.target.value)"
+                    />
+                    <p class="text-secondary small mb-0">
+                      {{ item.tableColumns }} columns × {{ item.tableRows }} rows ·
+                      {{ item.fields.length }} editable cells · Page {{ item.page }}
+                    </p>
+
+                    <!-- Collapsible action row -->
+                    <div class="d-flex gap-2 mt-2">
+                      <button
+                        class="btn btn-outline-secondary btn-sm"
+                        type="button"
+                        @click="toggleColumnHeaders(item.tableId)"
+                      >
+                        {{ isColumnHeadersExpanded(item.tableId) ? '▾' : '▸' }}
+                        Column headers
+                      </button>
+
+                      <button
+                        class="btn btn-outline-secondary btn-sm"
+                        type="button"
+                        @click="toggleTable(item.tableId)"
+                      >
+                        {{ isTableExpanded(item.tableId) ? '▾' : '▸' }}
+                        Edit cells ({{ item.fields.length }})
+                      </button>
+                    </div>
+
+                    <div v-if="isColumnHeadersExpanded(item.tableId)" class="border rounded p-2 mt-2 bg-light">
+                      <div class="table-column-editor">
+                        <div
+                          v-for="columnIndex in getTableColumnIndexes(item)"
+                          :key="columnIndex"
+                        >
+                          <label class="form-label small text-secondary mb-1">Column {{ columnIndex }}</label>
+                          <input
+                            class="form-control form-control-sm"
+                            type="text"
+                            :value="getTableColumnLabel(item, columnIndex)"
+                            @input="updateTableColumnLabel(item.tableId, columnIndex, $event.target.value)"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div v-if="isTableExpanded(item.tableId)" class="table-cell-list mt-2">
+                      <div
+                        v-for="cellField in item.fields"
+                        :key="cellField.id"
+                        :class="getFieldRowClass(cellField)"
+                        role="button"
+                        tabindex="0"
+                        @click="selectField(cellField.id)"
+                        @keydown.enter="selectField(cellField.id)"
+                      >
+                        <div class="d-flex justify-content-between gap-2">
+                          <div class="flex-grow-1">
+                            <p class="text-secondary small mb-1">Row {{ cellField.tableRow }} · Column {{ cellField.tableColumn }}</p>
+
+                            <label class="form-label small text-secondary mb-1">Cell label</label>
+                            <input
+                              class="form-control form-control-sm mb-2"
+                              type="text"
+                              :value="cellField.label"
+                              @input="updateField(cellField.id, { label: $event.target.value })"
+                            />
+
+                            <label class="form-label small text-secondary mb-1">Cell type</label>
+                            <select
+                              class="form-select form-select-sm mb-2"
+                              :value="cellField.type"
+                              @change="updateFieldType(cellField.id, $event.target.value)"
+                            >
+                              <option value="text">Text</option>
+                              <option value="date">Date</option>
+                              <option value="number">Number</option>
+                              <option value="checkbox">Checkbox</option>
+                              <option value="multiline">Multiline</option>
+                            </select>
+
+                            <div v-if="cellField.type === 'date'" class="border rounded p-2 mb-2 bg-light">
+                              <label class="form-label small text-secondary mb-1">Date render mode</label>
+                              <select
+                                class="form-select form-select-sm mb-2"
+                                :value="cellField.renderMode ?? 'single'"
+                                @change="updateField(cellField.id, { renderMode: $event.target.value })"
+                              >
+                                <option value="single">Single text</option>
+                                <option value="date_boxes">Date boxes</option>
+                              </select>
+
+                              <div v-if="cellField.renderMode === 'date_boxes'" class="row g-2">
+                                <div class="col-6">
+                                  <label class="form-label small text-secondary mb-1">Boxes</label>
+                                  <input
+                                    class="form-control form-control-sm"
+                                    type="number" min="1" max="12" step="1"
+                                    :value="cellField.boxCount ?? 8"
+                                    @input="updateField(cellField.id, { boxCount: Number($event.target.value) })"
+                                  />
+                                </div>
+                                <div class="col-6">
+                                  <label class="form-label small text-secondary mb-1">Gap %</label>
+                                  <input
+                                    class="form-control form-control-sm"
+                                    type="number" min="0" max="5" step="0.1"
+                                    :value="cellField.boxGap ?? 0.4"
+                                    @input="updateField(cellField.id, { boxGap: Number($event.target.value) })"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            <div class="row g-2">
+                              <div class="col-6">
+                                <label class="form-label small text-secondary mb-1">Width %</label>
+                                <input
+                                  class="form-control form-control-sm"
+                                  type="number" min="1" max="100" step="0.1"
+                                  :value="Number((cellField.rect.w * 100).toFixed(1))"
+                                  @input="updateFieldRectValue(cellField.id, 'w', $event.target.value)"
+                                />
+                              </div>
+                              <div class="col-6">
+                                <label class="form-label small text-secondary mb-1">Height %</label>
+                                <input
+                                  class="form-control form-control-sm"
+                                  type="number" min="0.5" max="100" step="0.1"
+                                  :value="Number((cellField.rect.h * 100).toFixed(1))"
+                                  @input="updateFieldRectValue(cellField.id, 'h', $event.target.value)"
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          <div class="d-flex flex-column align-items-end gap-2">
+                            <button
+                              class="btn btn-outline-danger btn-sm"
+                              type="button"
+                              @click.stop="removeField(cellField.id)"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  <div class="row g-2">
-                    <div class="col-6">
-                      <label class="form-label small text-secondary mb-1">Width %</label>
-                      <input
-                        class="form-control form-control-sm"
-                        type="number"
-                        min="1"
-                        max="100"
-                        step="0.1"
-                        :value="Number((field.rect.w * 100).toFixed(1))"
-                        @input="updateFieldRectValue(field.id, 'w', $event.target.value)"
-                      />
-                    </div>
-
-                    <div class="col-6">
-                      <label class="form-label small text-secondary mb-1">Height %</label>
-                      <input
-                        class="form-control form-control-sm"
-                        type="number"
-                        min="0.5"
-                        max="100"
-                        step="0.1"
-                        :value="Number((field.rect.h * 100).toFixed(1))"
-                        @input="updateFieldRectValue(field.id, 'h', $event.target.value)"
-                      />
-                    </div>
+                  <div class="d-flex flex-column align-items-end gap-2">
+                    <span class="badge text-bg-light border">
+                      {{ Math.round(item.confidence * 100) }}%
+                    </span>
                   </div>
-
-                  <p class="text-secondary small mt-2 mb-0">
-                    Page {{ field.page }} · {{ field.reason }}
-                  </p>
-                </div>
-
-                <div class="d-flex flex-column align-items-end gap-2">
-                  <span class="badge text-bg-light border">
-                    {{ Math.round(field.confidence * 100) }}%
-                  </span>
-
-                  <button
-                    class="btn btn-outline-secondary btn-sm"
-                    type="button"
-                    :disabled="index === 0"
-                    @click="moveField(field.id, 'up')"
-                    aria-label="Move up"
-                    title="Move up"
-                  >
-                    &uarr;
-                  </button>
-
-                  <button
-                    class="btn btn-outline-secondary btn-sm"
-                    type="button"
-                    :disabled="index === selectedForm.fields.length - 1"
-                    @click="moveField(field.id, 'down')"
-                    aria-label="Move down"
-                    title="Move down"
-                  >
-                    &darr;
-                  </button>
-
-                  <button
-                    class="btn btn-outline-danger btn-sm"
-                    type="button"
-                    @click="removeField(field.id)"
-                  >
-                    Remove
-                  </button>
                 </div>
               </div>
-            </div>
+            </template>
           </div>
         </div>
       </div>
@@ -431,5 +755,30 @@ const pdfPreviewRef = ref(null)
   min-width: 0;
   height: 100%;
   border: 1px solid rgba(25, 135, 84, 0.65);
+}
+
+.table-group-toggle {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+.table-column-editor {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+}
+
+.table-cell-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.table-cell-list .list-group-item {
+  border: 1px solid #dee2e6;
+  border-radius: 0.375rem;
+  background: #ffffff;
 }
 </style>

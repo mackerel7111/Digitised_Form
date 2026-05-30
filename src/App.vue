@@ -234,8 +234,41 @@ async function saveSubmissionToBackend(formId, values) {
 function getFillFormItems(fields) {
   const items = []
   const checkboxGroups = new Map()
+  const tableGroups = new Map()
 
   for (const field of fields) {
+    if (field.tableId) {
+      if (!tableGroups.has(field.tableId)) {
+        const tableItem = {
+          id: field.tableId,
+          type: 'table_group',
+          tableId: field.tableId,
+          tableName: field.tableName ?? 'Table',
+          page: field.page,
+          tableRows: field.tableRows ?? field.tableRow ?? 1,
+          tableColumns: field.tableColumns ?? field.tableColumn ?? 1,
+          fields: [],
+        }
+
+        tableGroups.set(field.tableId, tableItem)
+        items.push(tableItem)
+      }
+
+      const tableItem = tableGroups.get(field.tableId)
+
+      tableItem.fields.push(field)
+      tableItem.tableRows = Math.max(
+        tableItem.tableRows,
+        field.tableRows ?? field.tableRow ?? 1,
+      )
+      tableItem.tableColumns = Math.max(
+        tableItem.tableColumns,
+        field.tableColumns ?? field.tableColumn ?? 1,
+      )
+
+      continue
+    }
+
     if (field.type === 'checkbox' && field.group) {
       if (!checkboxGroups.has(field.group)) {
         const groupItem = {
@@ -250,11 +283,26 @@ function getFillFormItems(fields) {
       }
 
       checkboxGroups.get(field.group).fields.push(field)
-    } else {
-      items.push({
-        id: field.id,
-        type: 'field',
-        field,
+      continue
+    }
+
+    items.push({
+      id: field.id,
+      type: 'field',
+      field,
+    })
+  }
+
+  for (const item of items) {
+    if (item.type === 'table_group') {
+      item.fields.sort((a, b) => {
+        const rowDiff = (a.tableRow ?? 0) - (b.tableRow ?? 0)
+
+        if (rowDiff !== 0) {
+          return rowDiff
+        }
+
+        return (a.tableColumn ?? 0) - (b.tableColumn ?? 0)
       })
     }
   }
@@ -436,6 +484,58 @@ function updateField(fieldId, updates) {
   })
 }
 
+function updateTableColumnLabel(tableId, columnIndex, label) {
+  if (!selectedForm.value) {
+    return
+  }
+
+  forms.value = forms.value.map((form) => {
+    if (form.id !== selectedForm.value.id) {
+      return form
+    }
+
+    return {
+      ...form,
+      fields: form.fields.map((field) => {
+        if (field.tableId !== tableId || field.tableColumn !== columnIndex) {
+          return field
+        }
+
+        return {
+          ...field,
+          tableColumnLabel: label,
+        }
+      }),
+    }
+  })
+}
+
+function updateTableName(tableId, name) {
+  if (!selectedForm.value) {
+    return
+  }
+
+  forms.value = forms.value.map((form) => {
+    if (form.id !== selectedForm.value.id) {
+      return form
+    }
+
+    return {
+      ...form,
+      fields: form.fields.map((field) => {
+        if (field.tableId !== tableId) {
+          return field
+        }
+
+        return {
+          ...field,
+          tableName: name,
+        }
+      }),
+    }
+  })
+}
+
 function updateFieldType(fieldId, type) {
   const updates = { type }
 
@@ -444,6 +544,11 @@ function updateFieldType(fieldId, type) {
     updates.dateFormat = 'DDMMYYYY'
     updates.boxCount = 8
     updates.boxGap = 0.4
+  }
+
+  if (type === 'table') {
+    updates.tableColumns = 3
+    updates.tableRows = 3
   }
 
   updateField(fieldId, updates)
@@ -480,7 +585,7 @@ function getFieldBoxClass(field) {
     'field-box': true,
     'field-box-text': ['text', 'date', 'number'].includes(field.type),
     'field-box-checkbox': field.type === 'checkbox',
-    'field-box-multiline': field.type === 'multiline',
+    'field-box-multiline': ['multiline', 'table'].includes(field.type),
     'field-box-manual': field.reason === 'manually added',
     'field-box-selected': field.id === selectedFieldId.value,
   }
@@ -659,6 +764,7 @@ async function downloadFilledPdf() {
       <TemplateBuilderView
         v-else-if="currentView === 'builder' && selectedForm"
         :selected-form="selectedForm"
+        :selected-field-id="selectedFieldId"
         :back-to-dashboard="backToDashboard"
         :save-draft-template="saveDraftTemplate"
         :publish-template="publishTemplate"
@@ -667,6 +773,8 @@ async function downloadFilledPdf() {
         :move-field="moveField"
         :update-field="updateField"
         :update-field-type="updateFieldType"
+        :update-table-column-label="updateTableColumnLabel"
+        :update-table-name="updateTableName"
         :update-field-rect-value="updateFieldRectValue"
         :get-page-image-url="getPageImageUrl"
         :select-field="selectField"
