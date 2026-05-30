@@ -279,6 +279,42 @@ function removeField(fieldId) {
   })
 }
 
+function moveField(fieldId, direction) {
+  if (!selectedForm.value) {
+    return
+  }
+
+  const currentFormId = selectedForm.value.id
+  const delta = direction === 'up' ? -1 : 1
+
+  forms.value = forms.value.map((form) => {
+    if (form.id !== currentFormId) {
+      return form
+    }
+
+    const fields = [...form.fields]
+    const currentIndex = fields.findIndex((field) => field.id === fieldId)
+
+    if (currentIndex === -1) {
+      return form
+    }
+
+    const nextIndex = currentIndex + delta
+
+    if (nextIndex < 0 || nextIndex >= fields.length) {
+      return form
+    }
+
+    const [movedField] = fields.splice(currentIndex, 1)
+    fields.splice(nextIndex, 0, movedField)
+
+    return {
+      ...form,
+      fields,
+    }
+  })
+}
+
 async function loadSubmissions(formId) {
   const response = await fetch(`${API_BASE_URL}/api/forms/${formId}/submissions`)
 
@@ -628,6 +664,7 @@ async function downloadFilledPdf() {
         :publish-template="publishTemplate"
         :add-field="addField"
         :remove-field="removeField"
+        :move-field="moveField"
         :update-field="updateField"
         :update-field-type="updateFieldType"
         :update-field-rect-value="updateFieldRectValue"

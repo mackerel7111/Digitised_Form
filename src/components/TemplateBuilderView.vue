@@ -30,6 +30,10 @@ defineProps({
     type: Function,
     required: true,
   },
+  moveField: {
+    type: Function,
+    required: true,
+  },
   updateField: {
     type: Function,
     required: true,
@@ -169,7 +173,7 @@ const pdfPreviewRef = ref(null)
 
           <div v-else class="list-group field-list-scroll">
             <div
-              v-for="field in selectedForm.fields"
+              v-for="(field, index) in selectedForm.fields"
               :key="field.id"
               :class="getFieldRowClass(field)"
               role="button"
@@ -284,6 +288,28 @@ const pdfPreviewRef = ref(null)
                   <span class="badge text-bg-light border">
                     {{ Math.round(field.confidence * 100) }}%
                   </span>
+
+                  <button
+                    class="btn btn-outline-secondary btn-sm"
+                    type="button"
+                    :disabled="index === 0"
+                    @click="moveField(field.id, 'up')"
+                    aria-label="Move up"
+                    title="Move up"
+                  >
+                    &uarr;
+                  </button>
+
+                  <button
+                    class="btn btn-outline-secondary btn-sm"
+                    type="button"
+                    :disabled="index === selectedForm.fields.length - 1"
+                    @click="moveField(field.id, 'down')"
+                    aria-label="Move down"
+                    title="Move down"
+                  >
+                    &darr;
+                  </button>
 
                   <button
                     class="btn btn-outline-danger btn-sm"

@@ -304,7 +304,7 @@ def extract_text_line_fields(page, words, drawings, used_ids):
             continue
 
         # Put a little height above the physical line so text has room to render.
-        input_rect = fitz.Rect(rect.x0, rect.y0 - 12, rect.x1, rect.y0 + 4)
+        input_rect = fitz.Rect(rect.x0, rect.y0 - 16, rect.x1, rect.y0)
 
         field_id = make_unique_id(slugify(label), used_ids)
 
