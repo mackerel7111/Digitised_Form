@@ -12,12 +12,12 @@ A small web app for turning static PDF forms into reusable digital forms. Users 
 
 1. Upload a text-based PDF form.
 2. The backend uses PyMuPDF to inspect PDF words, lines, boxes, and checkbox-like shapes.
-3. A rule-based extractor suggests fields such as labelled text lines, checkbox groups, and multiline note areas.
-4. The Template Builder shows the PDF preview with overlay boxes.
+3. A rule-based extractor suggests fields such as labelled text lines, checkbox groups, multiline note areas, and tables.
+4. The Template Builder shows the PDF preview with overlay boxes. It supports advanced mappings like table grid alignment and multi-box date fields (e.g. DD/MM/YYYY or MM/YYYY).
 5. The user reviews the template: edit labels/types, add/remove fields, drag boxes, resize boxes, and publish.
 6. The Fill screen generates a simple web form from the published template.
-7. Saved entries are stored in SQLite.
-8. PDF export uses the reviewed field coordinates to write submitted values onto the original PDF.
+7. Saved entries are stored in SQLite and displayed with clean, sequential tracking IDs (e.g., Entry #0001).
+8. PDF export uses the reviewed field coordinates to seamlessly write submitted values onto the original PDF.
 
 The reviewed template is the source of truth. The extractor only creates a draft.
 
