@@ -30,7 +30,15 @@ const props = defineProps({
     type: Function,
     required: true,
   },
+  removeTableGroup: {
+    type: Function,
+    required: true,
+  },
   moveField: {
+    type: Function,
+    required: true,
+  },
+  moveTableGroup: {
     type: Function,
     required: true,
   },
@@ -252,7 +260,7 @@ function getTableColumnLabel(tableItem, columnIndex) {
               <span
                 v-if="field.type === 'date' && field.renderMode === 'date_boxes'"
                 class="date-box-preview"
-                :style="{ gap: `${field.boxGap ?? 0.4}%` }"
+                :style="{ gap: `${field.boxGap ?? 0.4}%`, '--box-count': field.boxCount ?? 8 }"
               >
                 <span
                   v-for="index in field.boxCount ?? 8"
@@ -342,8 +350,19 @@ function getTableColumnLabel(tableItem, columnIndex) {
                         <option value="date_boxes">Date boxes</option>
                       </select>
 
-                      <div v-if="item.field.renderMode === 'date_boxes'" class="row g-2">
-                        <div class="col-6">
+                      <div v-if="item.field.renderMode === 'date_boxes'">
+                        <label class="form-label small text-secondary mb-1">Date format</label>
+                        <select
+                          class="form-select form-select-sm mb-2"
+                          :value="item.field.dateFormat ?? 'DDMMYYYY'"
+                          @change="updateField(item.field.id, { dateFormat: $event.target.value })"
+                        >
+                          <option value="DDMMYYYY">DD/MM/YYYY (8 boxes)</option>
+                          <option value="MMYYYY">MM/YYYY (6 boxes)</option>
+                        </select>
+
+                        <div class="row g-2">
+                          <div class="col-6">
                           <label class="form-label small text-secondary mb-1">Boxes</label>
                           <input
                             class="form-control form-control-sm"
@@ -368,6 +387,7 @@ function getTableColumnLabel(tableItem, columnIndex) {
                             @input="updateField(item.field.id, { boxGap: Number($event.target.value) })"
                           />
                         </div>
+                      </div>
                       </div>
                     </div>
 
@@ -449,7 +469,7 @@ function getTableColumnLabel(tableItem, columnIndex) {
                       aria-label="Move up"
                       title="Move up"
                     >
-                      &uarr;
+                      ∧
                     </button>
 
                     <button
@@ -460,7 +480,7 @@ function getTableColumnLabel(tableItem, columnIndex) {
                       aria-label="Move down"
                       title="Move down"
                     >
-                      &darr;
+                      ∨
                     </button>
 
                     <button
@@ -579,8 +599,19 @@ function getTableColumnLabel(tableItem, columnIndex) {
                                 <option value="date_boxes">Date boxes</option>
                               </select>
 
-                              <div v-if="cellField.renderMode === 'date_boxes'" class="row g-2">
-                                <div class="col-6">
+                              <div v-if="cellField.renderMode === 'date_boxes'">
+                                <label class="form-label small text-secondary mb-1">Date format</label>
+                                <select
+                                  class="form-select form-select-sm mb-2"
+                                  :value="cellField.dateFormat ?? 'DDMMYYYY'"
+                                  @change="updateField(cellField.id, { dateFormat: $event.target.value })"
+                                >
+                                  <option value="DDMMYYYY">DD/MM/YYYY (8 boxes)</option>
+                                  <option value="MMYYYY">MM/YYYY (6 boxes)</option>
+                                </select>
+
+                                <div class="row g-2">
+                                  <div class="col-6">
                                   <label class="form-label small text-secondary mb-1">Boxes</label>
                                   <input
                                     class="form-control form-control-sm"
@@ -598,6 +629,7 @@ function getTableColumnLabel(tableItem, columnIndex) {
                                     @input="updateField(cellField.id, { boxGap: Number($event.target.value) })"
                                   />
                                 </div>
+                              </div>
                               </div>
                             </div>
 
@@ -641,6 +673,36 @@ function getTableColumnLabel(tableItem, columnIndex) {
                     <span class="badge text-bg-light border">
                       {{ Math.round(item.confidence * 100) }}%
                     </span>
+
+                    <button
+                      class="btn btn-outline-secondary btn-sm"
+                      type="button"
+                      :disabled="index === 0"
+                      aria-label="Move up"
+                      title="Move up"
+                      @click.stop="moveTableGroup(item.tableId, 'up')"
+                    >
+                      ∧
+                    </button>
+
+                    <button
+                      class="btn btn-outline-secondary btn-sm"
+                      type="button"
+                      :disabled="index === fieldEditorItems.length - 1"
+                      aria-label="Move down"
+                      title="Move down"
+                      @click.stop="moveTableGroup(item.tableId, 'down')"
+                    >
+                      ∨
+                    </button>
+
+                    <button
+                      class="btn btn-outline-danger btn-sm"
+                      type="button"
+                      @click.stop="removeTableGroup(item.tableId)"
+                    >
+                      Remove
+                    </button>
                   </div>
                 </div>
               </div>

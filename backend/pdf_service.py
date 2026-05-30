@@ -29,18 +29,26 @@ def format_date_value(value, date_format):
 
     value = str(value)
 
-    if date_format == "DDMMYYYY" and len(value) == 10 and value[4] == "-" and value[7] == "-":
-        year, month, day = value.split("-")
-        return f"{day}{month}{year}"
+    if date_format == "DDMMYYYY":
+        if len(value) == 10 and value[4] == "-" and value[7] == "-":
+            year, month, day = value.split("-")
+            return f"{day}{month}{year}"
+        return "".join(filter(str.isdigit, value))
+        
+    if date_format == "MMYYYY":
+        if len(value) == 7 and value[4] == "-":
+            year, month = value.split("-")
+            return f"{month}{year}"
+        return "".join(filter(str.isdigit, value))
 
-    return value.replace("-", "")
+    return "".join(filter(str.isdigit, value))
 
 
 def draw_date_boxes(page, rect, value, field):
     text = format_date_value(value, field.get("dateFormat", "DDMMYYYY"))
     box_count = int(field.get("boxCount", 8))
     gap_percent = float(field.get("boxGap", 0.4))
-    gap = (gap_percent / 100) * page.rect.width
+    gap = (gap_percent / 100) * rect.width
 
     if not text:
         return
@@ -50,8 +58,14 @@ def draw_date_boxes(page, rect, value, field):
     box_width = (rect.width - total_gap) / box_count
 
     for index, char in enumerate(text):
+        if not char.strip():
+            continue
+
         x0 = rect.x0 + index * (box_width + gap)
         slot = fitz.Rect(x0, rect.y0, x0 + box_width, rect.y1)
+
+        if slot.is_empty or slot.is_infinite:
+            continue
 
         page.insert_textbox(
             slot,
@@ -67,7 +81,14 @@ def draw_field_value(page, field, value):
     if value in (None, "", False):
         return
 
+    text = str(value).strip()
+    if not text:
+        return
+
     rect = denormalize_rect(field["rect"], page)
+    if rect.is_empty or rect.is_infinite:
+        return
+
     field_type = field.get("type", "text")
 
     if field_type == "date" and field.get("renderMode") == "date_boxes":
@@ -87,7 +108,7 @@ def draw_field_value(page, field, value):
     if field_type == "multiline":
         page.insert_textbox(
             rect,
-            str(value),
+            text,
             fontsize=9,
             fontname="helv",
             align=fitz.TEXT_ALIGN_LEFT,
@@ -97,7 +118,7 @@ def draw_field_value(page, field, value):
 
     page.insert_text(
         fitz.Point(rect.x0, rect.y1 - 3),
-        str(value),
+        text,
         fontsize=10,
         fontname="helv",
         color=(0, 0, 0),

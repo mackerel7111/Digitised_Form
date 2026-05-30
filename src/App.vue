@@ -327,6 +327,23 @@ function removeField(fieldId) {
   })
 }
 
+function removeTableGroup(tableId) {
+  if (!selectedForm.value) {
+    return
+  }
+
+  forms.value = forms.value.map((form) => {
+    if (form.id !== selectedForm.value.id) {
+      return form
+    }
+
+    return {
+      ...form,
+      fields: form.fields.filter((field) => field.tableId !== tableId),
+    }
+  })
+}
+
 function moveField(fieldId, direction) {
   if (!selectedForm.value) {
     return
@@ -363,6 +380,46 @@ function moveField(fieldId, direction) {
   })
 }
 
+function moveTableGroup(tableId, direction) {
+  if (!selectedForm.value) {
+    return
+  }
+
+  const currentFormId = selectedForm.value.id
+
+  forms.value = forms.value.map((form) => {
+    if (form.id !== currentFormId) {
+      return form
+    }
+
+    const fields = [...form.fields]
+    const groupFields = fields.filter((f) => f.tableId === tableId)
+    const otherFields = fields.filter((f) => f.tableId !== tableId)
+
+    if (groupFields.length === 0) {
+      return form
+    }
+
+    // Count how many non-group fields appear before the group's first field
+    const firstGroupIndex = fields.findIndex((f) => f.tableId === tableId)
+    const othersBefore = fields.slice(0, firstGroupIndex).filter((f) => f.tableId !== tableId).length
+    const newOthersBefore = othersBefore + (direction === 'up' ? -1 : 1)
+
+    if (newOthersBefore < 0 || newOthersBefore > otherFields.length) {
+      return form
+    }
+
+    return {
+      ...form,
+      fields: [
+        ...otherFields.slice(0, newOthersBefore),
+        ...groupFields,
+        ...otherFields.slice(newOthersBefore),
+      ],
+    }
+  })
+}
+
 async function loadSubmissions(formId) {
   const response = await fetch(`${API_BASE_URL}/api/forms/${formId}/submissions`)
 
@@ -391,7 +448,7 @@ async function openEntries(formId) {
   }
 }
 
-async function downloadSubmissionPdf(submission) {
+async function downloadSubmissionPdf(submission, entryNumber) {
   if (!selectedForm.value) {
     return
   }
@@ -418,7 +475,8 @@ async function downloadSubmissionPdf(submission) {
   const link = document.createElement('a')
 
   link.href = downloadUrl
-  link.download = `${selectedForm.value.name.replace(/\.pdf$/i, '')}-${submission.id}.pdf`
+  const entryId = entryNumber ? String(entryNumber).padStart(4, '0') : submission.id.slice(0, 8)
+  link.download = `${selectedForm.value.name.replace(/\.pdf$/i, '')}_${entryId}.pdf`
   document.body.appendChild(link)
   link.click()
   link.remove()
@@ -740,7 +798,7 @@ async function downloadFilledPdf() {
   const link = document.createElement('a')
 
   link.href = downloadUrl
-  link.download = `${selectedForm.value.name.replace(/\.pdf$/i, '')}-filled.pdf`
+  link.download = `${selectedForm.value.name.replace(/\.pdf$/i, '')}_Preview.pdf`
   document.body.appendChild(link)
   link.click()
   link.remove()
@@ -770,7 +828,9 @@ async function downloadFilledPdf() {
         :publish-template="publishTemplate"
         :add-field="addField"
         :remove-field="removeField"
+        :remove-table-group="removeTableGroup"
         :move-field="moveField"
+        :move-table-group="moveTableGroup"
         :update-field="updateField"
         :update-field-type="updateFieldType"
         :update-table-column-label="updateTableColumnLabel"

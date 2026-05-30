@@ -47,12 +47,12 @@ defineProps({
 
     <div v-else class="list-group list-group-flush">
       <div
-        v-for="submission in selectedSubmissions"
+        v-for="(submission, index) in selectedSubmissions"
         :key="submission.id"
         class="list-group-item d-flex flex-column flex-md-row justify-content-between gap-3 py-3"
       >
         <div>
-          <h3 class="h6 mb-1">Entry {{ submission.id.slice(0, 8) }}</h3>
+          <h3 class="h6 mb-1">Entry #{{ String(selectedSubmissions.length - index).padStart(4, '0') }}</h3>
           <p class="text-secondary small mb-0">
             Saved {{ new Date(submission.createdAt).toLocaleString() }}
           </p>
@@ -62,7 +62,7 @@ defineProps({
           <button
             class="btn btn-outline-success btn-sm"
             type="button"
-            @click="downloadSubmissionPdf(submission)"
+            @click="downloadSubmissionPdf(submission, selectedSubmissions.length - index)"
           >
             Download PDF
           </button>

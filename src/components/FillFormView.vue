@@ -164,7 +164,7 @@ function getTableColumnIndexes(tableItem) {
                       <input
                         v-else-if="getTableCellField(item, rowIndex, columnIndex).type === 'date'"
                         class="form-control form-control-sm"
-                        type="date"
+                        :type="getTableCellField(item, rowIndex, columnIndex).dateFormat === 'MMYYYY' ? 'month' : 'date'"
                         :aria-label="getTableCellField(item, rowIndex, columnIndex).label"
                         :value="submissionValues[getTableCellField(item, rowIndex, columnIndex).id]"
                         @input="
@@ -253,7 +253,7 @@ function getTableColumnIndexes(tableItem) {
             v-else-if="item.field.type === 'date'"
             :id="`input-${item.field.id}`"
             class="form-control"
-            type="date"
+            :type="item.field.dateFormat === 'MMYYYY' ? 'month' : 'date'"
             :value="submissionValues[item.field.id]"
             @input="updateSubmissionValue(item.field.id, $event.target.value)"
           />

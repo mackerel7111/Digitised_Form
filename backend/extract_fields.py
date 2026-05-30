@@ -684,9 +684,6 @@ def extract_table_fields_with_pymupdf(page, words, used_ids):
     tables = getattr(table_result, "tables", [])
 
     for table_index, table in enumerate(tables, start=1):
-        table_rect = fitz.Rect(table.bbox)
-        table_regions.append(table_rect)
-
         cells = getattr(table, "cells", None)
 
         if not cells:
@@ -698,6 +695,8 @@ def extract_table_fields_with_pymupdf(page, words, used_ids):
         y_positions = group_cell_positions([rect_center_y(rect) for rect in cell_rects])
         column_count = len(x_positions)
         row_count = len(y_positions)
+
+        table_fields = []
 
         for cell_index, cell in enumerate(cells, start=1):
             if cell is None:
@@ -723,7 +722,7 @@ def extract_table_fields_with_pymupdf(page, words, used_ids):
                 used_ids,
             )
 
-            fields.append(
+            table_fields.append(
                 {
                     "id": field_id,
                     "label": f"Table {table_index} R{row_index} C{column_index}",
@@ -742,6 +741,12 @@ def extract_table_fields_with_pymupdf(page, words, used_ids):
                     "tableColumns": column_count,
                 }
             )
+
+        # Only register as a table region if it actually produced fillable fields.
+        # This prevents checkbox-group bordered boxes from being misclassified.
+        if table_fields:
+            fields.extend(table_fields)
+            table_regions.append(fitz.Rect(table.bbox))
 
     return fields, table_regions
 
@@ -851,7 +856,23 @@ def get_words_left_of_x_on_checkbox_row(words, row_rect, x_limit):
 def extract_checkbox_fields(page, words, drawings, used_ids):
     fields = []
 
-    checkbox_rects = [rect for rect in drawings if is_checkbox(rect, page)]
+    # extract_drawings() decomposes every rectangle into 4 thin border lines,
+    # so is_checkbox() would never match anything in `drawings`.
+    # Scan raw page drawings directly for "re" items that are checkbox-sized.
+    seen = set()
+    checkbox_rects = []
+
+    for drawing in page.get_drawings():
+        for item in drawing.get("items", []):
+            if item[0] != "re":
+                continue
+            rect = item[1]
+            if not is_checkbox(rect, page):
+                continue
+            key = (round(rect.x0, 1), round(rect.y0, 1), round(rect.x1, 1), round(rect.y1, 1))
+            if key not in seen:
+                seen.add(key)
+                checkbox_rects.append(rect)
     checkbox_rows = group_checkboxes_by_row(checkbox_rects)
 
     for row_rects in checkbox_rows.values():
@@ -922,10 +943,25 @@ def find_nearby_heading_above(words, rect):
 def extract_multiline_fields(page, words, drawings, used_ids):
     fields = []
 
-    for rect in drawings:
-        if not is_large_text_area(rect, page):
-            continue
+    # extract_drawings() decomposes rectangles into thin border lines (~0.6px),
+    # so is_large_text_area() (requires height > 40) would never match.
+    # Scan raw page drawings directly for large "re" rectangle items.
+    seen = set()
+    large_rects = []
 
+    for drawing in page.get_drawings():
+        for item in drawing.get("items", []):
+            if item[0] != "re":
+                continue
+            rect = item[1]
+            if not is_large_text_area(rect, page):
+                continue
+            key = (round(rect.x0, 1), round(rect.y0, 1), round(rect.x1, 1), round(rect.y1, 1))
+            if key not in seen:
+                seen.add(key)
+                large_rects.append(rect)
+
+    for rect in large_rects:
         label = find_nearby_heading_above(words, rect)
 
         if not label:
